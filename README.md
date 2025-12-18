@@ -4,7 +4,7 @@ Imagen Docker pre-construida para desarrollo Laravel optimizada para uso con Cod
 
 ## Contenido
 
-- **PHP 8.3** con extensiones para Laravel:
+- **PHP 8.4** con extensiones para Laravel:
   - pgsql, sqlite3, gd, curl, imap, mbstring, xml, zip
   - bcmath, soap, intl, readline, ldap
   - msgpack, igbinary, redis, pcov, xdebug

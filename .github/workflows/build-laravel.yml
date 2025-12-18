@@ -61,11 +61,11 @@ jobs:
           echo "Validando imagen Docker..."
           IMAGE_TAG="${{ env.REGISTRY }}/${{ steps.image_name.outputs.image_name }}:${{ steps.version.outputs.version }}"
 
-          # Validar version de PHP 8.3
+          # Validar version de PHP 8.4
           echo "Verificando version de PHP..."
           PHP_VERSION=$(docker run --rm $IMAGE_TAG php -r "echo PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION;")
-          if [ "$PHP_VERSION" != "8.3" ]; then
-            echo "Error: Se esperaba PHP 8.3, se encontro PHP $PHP_VERSION"
+          if [ "$PHP_VERSION" != "8.4" ]; then
+            echo "Error: Se esperaba PHP 8.4, se encontro PHP $PHP_VERSION"
             exit 1
           fi
           echo "  PHP $PHP_VERSION detectado"
