@@ -1,0 +1,140 @@
+name: Build Laravel DevContainer Image
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set image name to lowercase
+        id: image_name
+        run: |
+          IMAGE_NAME=$(echo "${{ github.repository_owner }}/laravel-devcontainer" | tr '[:upper:]' '[:lower:]')
+          echo "image_name=$IMAGE_NAME" >> $GITHUB_OUTPUT
+          echo "Nombre de la imagen: $IMAGE_NAME"
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            VERSION=${GITHUB_REF#refs/tags/v}
+          else
+            VERSION="dev-$(date +%Y%m%d%H%M%S)"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Version de la imagen: $VERSION"
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ steps.image_name.outputs.image_name }}
+          tags: |
+            type=raw,value=latest
+            type=raw,value=${{ steps.version.outputs.version }}
+
+      - name: Build Docker image (without push)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          load: true
+
+      - name: Validate Docker image
+        run: |
+          echo "Validando imagen Docker..."
+          IMAGE_TAG="${{ env.REGISTRY }}/${{ steps.image_name.outputs.image_name }}:${{ steps.version.outputs.version }}"
+
+          # Validar version de PHP 8.3
+          echo "Verificando version de PHP..."
+          PHP_VERSION=$(docker run --rm $IMAGE_TAG php -r "echo PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION;")
+          if [ "$PHP_VERSION" != "8.3" ]; then
+            echo "Error: Se esperaba PHP 8.3, se encontro PHP $PHP_VERSION"
+            exit 1
+          fi
+          echo "  PHP $PHP_VERSION detectado"
+
+          # Validar extensiones PHP requeridas
+          echo "Verificando extensiones PHP..."
+          for ext in pgsql mbstring xml zip bcmath intl redis; do
+            if ! docker run --rm $IMAGE_TAG php -m | grep -qi "^$ext$"; then
+              echo "Error: Extension PHP '$ext' no encontrada"
+              exit 1
+            fi
+            echo "  - $ext OK"
+          done
+
+          # Validar Composer
+          echo "Verificando Composer..."
+          COMPOSER_VERSION=$(docker run --rm $IMAGE_TAG composer --version 2>&1 | head -1)
+          echo "  $COMPOSER_VERSION"
+
+          # Validar Node.js
+          echo "Verificando Node.js..."
+          NODE_VERSION=$(docker run --rm $IMAGE_TAG node --version 2>&1)
+          echo "  Node.js $NODE_VERSION"
+
+          # Validar npm
+          echo "Verificando npm..."
+          NPM_VERSION=$(docker run --rm $IMAGE_TAG npm --version 2>&1)
+          echo "  npm $NPM_VERSION"
+
+          # Validar Laravel Installer
+          echo "Verificando Laravel Installer..."
+          if docker run --rm $IMAGE_TAG laravel --version 2>&1 | grep -q "Laravel"; then
+            echo "  Laravel Installer OK"
+          else
+            echo "Error: Laravel Installer no encontrado"
+            exit 1
+          fi
+
+          # Validar usuario coder con UID 1000
+          echo "Verificando usuario coder..."
+          CODER_UID=$(docker run --rm $IMAGE_TAG id -u coder 2>/dev/null | tr -d '\r\n ' || echo "0")
+          if [ "$CODER_UID" != "1000" ]; then
+            echo "Error: Usuario coder deberia tener UID 1000, tiene '$CODER_UID'"
+            exit 1
+          fi
+          echo "  Usuario coder con UID 1000 OK"
+
+          # Validar directorio /workspaces
+          echo "Verificando directorio /workspaces..."
+          if ! docker run --rm $IMAGE_TAG test -d /workspaces; then
+            echo "Error: Directorio /workspaces no existe"
+            exit 1
+          fi
+          echo "  Directorio /workspaces existe OK"
+
+          echo ""
+          echo "Todas las validaciones pasaron exitosamente"
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
