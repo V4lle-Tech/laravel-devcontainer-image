@@ -4,7 +4,7 @@ FROM ubuntu:22.04
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=UTC
 
-# Instalar dependencias base, PHP 8.3 y extensiones en una sola capa
+# Instalar dependencias base, PHP 8.4 y extensiones en una sola capa
 RUN apt-get update && apt-get install -y \
     curl \
     git \
@@ -43,16 +43,20 @@ RUN apt-get update && apt-get install -y \
     nano \
     && rm -rf /var/lib/apt/lists/*
 
-# Instalar Composer, Node.js y MinIO Client en paralelo (una sola capa)
+# Instalar Composer y Node.js
 RUN curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
-    && curl -fsSL -o /usr/local/bin/mc https://dl.min.io/client/mc/release/linux-amd64/mc \
-    && chmod +x /usr/local/bin/mc \
     && rm -rf /var/lib/apt/lists/*
 
+# Instalar MinIO Client (arquitectura dinámica)
+RUN ARCH=$(dpkg --print-architecture) && \
+    if [ "$ARCH" = "arm64" ]; then MC_ARCH="linux-arm64"; else MC_ARCH="linux-amd64"; fi && \
+    curl -fsSL -o /usr/local/bin/mc https://dl.min.io/client/mc/release/${MC_ARCH}/mc && \
+    chmod +x /usr/local/bin/mc
+
 # Crear usuario coder
-RUN useradd -m -s /bin/bash -u 1000 coder && \
+RUN useradd -m -s /bin/bash coder && \
     echo "coder ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers.d/coder && \
     chmod 0440 /etc/sudoers.d/coder && \
     chown -R coder:coder /home/coder
@@ -71,6 +75,7 @@ ENV NPM_CONFIG_PREFIX=/home/coder/.npm-global \
     COMPOSER_HOME=/home/coder/.composer \
     PATH=/home/coder/.bun/bin:/home/coder/.npm-global/bin:/home/coder/.composer/vendor/bin:$PATH
 
+# Instalar Bun (arquitectura dinámica automática)
 RUN mkdir -p /home/coder/.npm-global /home/coder/.bun /home/coder/.composer \
     && curl -fsSL https://bun.sh/install | bash \
     && npm install -g @vue/cli create-vite \

@@ -11,7 +11,17 @@ env:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            platform: linux/amd64
+            suffix: amd64
+          - runner: ubuntu-24.04-arm
+            platform: linux/arm64
+            suffix: arm64
+
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
       packages: write
@@ -25,7 +35,6 @@ jobs:
         run: |
           IMAGE_NAME=$(echo "${{ github.repository_owner }}/laravel-devcontainer" | tr '[:upper:]' '[:lower:]')
           echo "image_name=$IMAGE_NAME" >> $GITHUB_OUTPUT
-          echo "Nombre de la imagen: $IMAGE_NAME"
 
       - name: Extract version from tag
         id: version
@@ -36,7 +45,6 @@ jobs:
             VERSION="dev-$(date +%Y%m%d%H%M%S)"
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Version de la imagen: $VERSION"
 
       - name: Extract metadata
         id: meta
@@ -44,8 +52,8 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ steps.image_name.outputs.image_name }}
           tags: |
-            type=raw,value=latest
-            type=raw,value=${{ steps.version.outputs.version }}
+            type=raw,value=latest-${{ matrix.suffix }}
+            type=raw,value=${{ steps.version.outputs.version }}-${{ matrix.suffix }}
 
       - name: Build Docker image (without push)
         uses: docker/build-push-action@v5
@@ -59,9 +67,8 @@ jobs:
       - name: Validate Docker image
         run: |
           echo "Validando imagen Docker..."
-          IMAGE_TAG="${{ env.REGISTRY }}/${{ steps.image_name.outputs.image_name }}:${{ steps.version.outputs.version }}"
+          IMAGE_TAG="${{ env.REGISTRY }}/${{ steps.image_name.outputs.image_name }}:${{ steps.version.outputs.version }}-${{ matrix.suffix }}"
 
-          # Validar version de PHP 8.4
           echo "Verificando version de PHP..."
           PHP_VERSION=$(docker run --rm $IMAGE_TAG php -r "echo PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION;")
           if [ "$PHP_VERSION" != "8.4" ]; then
@@ -70,7 +77,6 @@ jobs:
           fi
           echo "  PHP $PHP_VERSION detectado"
 
-          # Validar extensiones PHP requeridas
           echo "Verificando extensiones PHP..."
           for ext in pgsql mbstring xml zip bcmath intl redis; do
             if ! docker run --rm $IMAGE_TAG php -m | grep -qi "^$ext$"; then
@@ -80,22 +86,15 @@ jobs:
             echo "  - $ext OK"
           done
 
-          # Validar Composer
           echo "Verificando Composer..."
-          COMPOSER_VERSION=$(docker run --rm $IMAGE_TAG composer --version 2>&1 | head -1)
-          echo "  $COMPOSER_VERSION"
+          docker run --rm $IMAGE_TAG composer --version 2>&1 | head -1
 
-          # Validar Node.js
           echo "Verificando Node.js..."
-          NODE_VERSION=$(docker run --rm $IMAGE_TAG node --version 2>&1)
-          echo "  Node.js $NODE_VERSION"
+          docker run --rm $IMAGE_TAG node --version
 
-          # Validar npm
           echo "Verificando npm..."
-          NPM_VERSION=$(docker run --rm $IMAGE_TAG npm --version 2>&1)
-          echo "  npm $NPM_VERSION"
+          docker run --rm $IMAGE_TAG npm --version
 
-          # Validar Laravel Installer
           echo "Verificando Laravel Installer..."
           if docker run --rm $IMAGE_TAG laravel --version 2>&1 | grep -q "Laravel"; then
             echo "  Laravel Installer OK"
@@ -104,7 +103,6 @@ jobs:
             exit 1
           fi
 
-          # Validar usuario coder con UID 1000
           echo "Verificando usuario coder..."
           CODER_UID=$(docker run --rm $IMAGE_TAG id -u coder 2>/dev/null | tr -d '\r\n ' || echo "0")
           if [ "$CODER_UID" != "1000" ]; then
@@ -113,7 +111,6 @@ jobs:
           fi
           echo "  Usuario coder con UID 1000 OK"
 
-          # Validar directorio /workspaces
           echo "Verificando directorio /workspaces..."
           if ! docker run --rm $IMAGE_TAG test -d /workspaces; then
             echo "Error: Directorio /workspaces no existe"
@@ -121,8 +118,16 @@ jobs:
           fi
           echo "  Directorio /workspaces existe OK"
 
+          echo "Verificando MinIO Client..."
+          if docker run --rm $IMAGE_TAG mc --version 2>&1 | grep -q "mc version"; then
+            echo "  MinIO Client OK"
+          else
+            echo "Error: MinIO Client no encontrado"
+            exit 1
+          fi
+
           echo ""
-          echo "Todas las validaciones pasaron exitosamente"
+          echo "Todas las validaciones pasaron exitosamente para ${{ matrix.suffix }}"
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
